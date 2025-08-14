@@ -3,6 +3,7 @@
  * - Honors window.CONTENTS_TITLE (fallback provided)
  * - Works on SPA route changes and initial render
  * - iOS-visible debug banner on errors
+ * - Hardened against malformed URL encodings & Safari regex quirks
  */
 ((w) => {
   const SAME_FOLDER_ONLY = true;
@@ -19,6 +20,7 @@
 
   // Minimal debug banner (visible on iOS)
   const dbg = (msg) => {
+    const text = String(msg);
     let el = document.getElementById('nav-debug-banner');
     if (!el) {
       el = document.createElement('div');
@@ -27,12 +29,14 @@
         position:'fixed', left:'8px', bottom:'8px', zIndex:'999999',
         background:'rgba(0,0,0,.75)', color:'#fff', padding:'6px 8px',
         borderRadius:'6px', font:'12px -apple-system, system-ui, sans-serif',
-        maxWidth:'80vw', lineHeight:'1.25'
+        maxWidth:'80vw', lineHeight:'1.25', whiteSpace:'pre-wrap'
       });
       document.body.appendChild(el);
-      setTimeout(()=> el.remove(), 6000);
+      setTimeout(()=> el && el.remove(), 7000);
+      el.textContent = text;
+    } else {
+      el.textContent += '\n' + text;
     }
-    el.textContent = String(msg);
   };
 
   // Inject default styling once
@@ -72,13 +76,43 @@
     return nav;
   };
 
-  // Title normalizer (handles emoji/punctuation/case)
-  const norm = (s) => String(s || '')
-    .normalize('NFKD')
-    .replace(/\p{Extended_Pictographic}/gu,'')      // strip emoji
-    .replace(/[^\p{L}\p{N}]+/gu,' ')                // collapse punctuation
-    .trim()
-    .toLowerCase();
+  // Robust normalizer with Safari-safe fallback (no Unicode property classes)
+  const norm = (() => {
+    let fastOK = true;
+    const fast = (s) => String(s || '')
+      .normalize('NFKD')
+      .replace(/\p{Extended_Pictographic}/gu,'')      // strip emoji
+      .replace(/[^\p{L}\p{N}]+/gu,' ')                // collapse punctuation
+      .trim().toLowerCase();
+    const safe = (s) => String(s || '')
+      .normalize('NFKD')
+      // coarse emoji-ish ranges + symbols; not perfect, but safe on iOS
+      .replace(/[\u2190-\u21FF\u2200-\u23FF\u2460-\u24FF\u2500-\u25FF\u2600-\u27BF\uFE0F]/g,'')
+      .replace(/[^A-Za-z0-9]+/g,' ')
+      .trim().toLowerCase();
+    return (s) => {
+      if (fastOK) {
+        try { return fast(s); }
+        catch { fastOK = false; }
+      }
+      return safe(s);
+    };
+  })();
+
+  // Safe decode of the current path (guards malformed % encodings)
+  const safeCurrentSlug = () => {
+    const raw = location.pathname.replace(/^\/|\.html?$/gi, '');
+    try {
+      // Only try to decode if it *looks* encoded; otherwise avoid throwing
+      return (/%[0-9A-Fa-f]{2}/.test(raw) || /%/.test(raw))
+        ? decodeURIComponent(raw)
+        : raw;
+    } catch {
+      // last-resort: replace lone '%' with '%25' and try once more
+      try { return decodeURIComponent(raw.replace(/%(?![0-9A-Fa-f]{2})/g, '%25')); }
+      catch { return raw; }
+    }
+  };
 
   // Fetch and normalize search index (cache in-memory per session)
   let PAGES = null;
@@ -89,7 +123,7 @@
     const raw = (idx.pages ?? idx ?? []);
     PAGES = raw.map(p => {
       const rawPath = (p.path || p.relativePath || (p.url || '').replace(/^\//, '') || '');
-      const path = rawPath.replace(/\.md$/i, '');
+      const path = rawPath.replace(/\.md$/i, '').replace(/\/index$/i, '');
       if (!path) return null;
       const basename = path.split('/').pop() || '';
       const title = (p.title || p.basename || basename.replace(/-/g,' ')).trim();
@@ -102,15 +136,17 @@
   // Compute neighbors for current page
   const compute = async () => {
     const pages = await getPages();
-    const rawCurrent = decodeURIComponent(location.pathname.replace(/^\/|\.html?$/gi, ''));
-    const currentSlug = rawCurrent.endsWith('/') ? rawCurrent.slice(0,-1) : rawCurrent;
+    const currentSlug = safeCurrentSlug().replace(/\/+$/,''); // drop trailing slash
     const folder = currentSlug.split('/').slice(0,-1).join('/');
-    const set = pages.filter(p => SAME_FOLDER_ONLY ? p.parent === folder : true)
+    const set = pages
+      .filter(p => SAME_FOLDER_ONLY ? p.parent === folder : true)
       .sort(ORDER_BY_FILENAME
         ? (a,b)=>a.basename.localeCompare(b.basename, undefined, {sensitivity:'base'})
         : (a,b)=>a.title.localeCompare(b.title, undefined, {sensitivity:'base'}));
+
     const i = set.findIndex(p => p.path === currentSlug);
     if (i === -1) throw new Error(`Current page not in search index: /${currentSlug}`);
+
     const prev = i>0 ? set[i-1] : null;
     const next = i<set.length-1 ? set[i+1] : null;
 
@@ -144,7 +180,7 @@
       else container.appendChild(topNav);
       container.appendChild(mkNav(prev, contents, next));
     } catch (e) {
-      dbg(`Nav error: ${e.message || e}`);
+      dbg(`Nav error: ${e && e.message ? e.message : e}`);
     }
   };
 
