@@ -37,15 +37,15 @@ body.zoom-open { overflow: hidden; }
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: 4px;
+  border-radius: var(--img-border-radius);
   box-shadow: 0 4px 20px rgba(0,0,0,.6);
   background: #000;
 }
 
 .zoom-overlay__caption {
-  color: rgba(255,255,255,.85);
-  font-style: italic;
+  color: var(--text-muted);
   text-align: center;
+  font-family: 'Alegreya SC', sans-serif;
   line-height: 1.3;
   max-width: 80ch;
   margin: 0 auto;
@@ -76,8 +76,18 @@ body.zoom-open { overflow: hidden; }
   width: 40%;
   z-index: 9998;
 }
-.zoom-overlay__nav--left  { left: 0;  cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'), w-resize; }
-.zoom-overlay__nav--right { right: 0; cursor: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"/>'), e-resize; }
+.zoom-overlay__nav--left {
+  left: 0;
+  cursor: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'>\
+<polygon points='20,6 12,16 20,26' fill='white'/></svg>") 16 16, w-resize;
+}
+.zoom-overlay__nav--right {
+  right: 0;
+  cursor: url("data:image/svg+xml;utf8,\
+<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'>\
+<polygon points='12,6 20,16 12,26' fill='white'/></svg>") 16 16, e-resize;
+}
 
 /* Fade-in */
 @media (prefers-reduced-motion: no-preference) {
