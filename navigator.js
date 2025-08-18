@@ -1,13 +1,16 @@
 /**
  * Prev | Contents | Next navigation for Obsidian Publish (custom domain safe)
- * - Parses PrevNote/NextNote from rendered frontmatter
- * - Waits for frontmatter to appear, recomputes on route/mutation
- * - Encodes paths like Publish (+ for spaces, %26 for &)
- * - Uses absolute links to custom domain to bypass <base> hijack
- 
- * - in the script that imports this one, set 
-   - window.CONTENTS_TITLE = [title of the contents/home page]
-*/
+ * - Centers inside markdown content width (not screen)
+ * - Top nav mounts inside the map banner if present (absolute, top-aligned)
+ * - Bottom nav mounts just above div.backlinks
+ * - Works with frontmatter PrevNote / NextNote
+ *
+ * In your loader script, you can set:
+ *   window.CONTENTS_TITLE = '...'
+ *   window.CONTENTS_PATH  = '/path/to/contents'
+ *
+ * This file cooperates with the H1 map script (wrap id = 'h1-map-wrap').
+ */
 
 (() => {
   const NAV_CLASS = 'note-nav';
@@ -21,31 +24,78 @@
 
   const CONTENTS_PATH =
     (typeof window.CONTENTS_PATH === 'string' && window.CONTENTS_PATH.trim())
-      ? window.CONTENTS_PATH.trim().replace(/^\//,'').replace(/\.md$/i,'')
+      ? window.CONTENTS_PATH.trim().replace(/^\//, '').replace(/\.md$/i, '')
       : null;
+
+  // Keep in sync with h1-map script
+  const MAP_WRAP_ID = 'h1-map-wrap';
 
   // Ensure links always go to your custom domain
   const BASE_ORIGIN = (window.siteInfo && window.siteInfo.customurl)
-    ? ('https://' + window.siteInfo.customurl.replace(/^https?:\/\//,'').replace(/\/$/,''))
+    ? ('https://' + window.siteInfo.customurl.replace(/^https?:\/\//, '').replace(/\/$/, ''))
     : (location.origin || 'https://publish.obsidian.md');
+
+  const getContentContainer = () =>
+    document.querySelector('#content') ||
+    document.querySelector('.markdown-preview-view') ||
+    document.querySelector('.markdown-preview-section') ||
+    document.body;
 
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
+
     const style = document.createElement('style');
     style.id = STYLE_ID;
     style.textContent = `
-      .${NAV_CLASS}{display:flex;justify-content:center;gap:.25rem;margin:1rem 0;font-size:.95rem}
-      .${NAV_CLASS}__link{text-decoration:none}
-      .${NAV_CLASS}__link[href]{text-decoration:underline}
-      .${NAV_CLASS}__sep{opacity:.6}
-      .${NAV_CLASS}__link:not([href]){opacity:.4;pointer-events:none;text-decoration:none}
+      :root {
+        --nav-font-size: var(--font-normal, 1rem);
+        --nav-gap: .35rem;
+      }
+
+      /* Center within the markdown column, never screen */
+      .${NAV_CLASS} {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: var(--nav-gap);
+        margin: 1rem 0;
+        font-size: var(--nav-font-size);
+        line-height: 1.2;
+        text-wrap: balance;
+        position: relative;
+        z-index: 3; /* render above map iframe if mounted there */
+        color: var(--text-normal, inherit);
+      }
+
+      .${NAV_CLASS}__link { text-decoration: none; }
+      .${NAV_CLASS}__link[href] { text-decoration: underline; }
+      .${NAV_CLASS}__sep { opacity: .6; }
+      .${NAV_CLASS}__link:not([href]) {
+        opacity: .4;
+        pointer-events: none;
+        text-decoration: none;
+      }
+
+      /* When we place the top nav inside the map banner, pin it to the top */
+      #${MAP_WRAP_ID} > .${NAV_CLASS}.is-top {
+        position: absolute;
+        top: .35rem;
+        left: 0;
+        right: 0;
+        margin: 0; /* rely on absolute positioning */
+        pointer-events: auto;
+        padding: 0 .5rem;
+        z-index: 5; /* ensure above overlays */
+      }
     `;
     document.head.appendChild(style);
   };
 
   const encodePathForPublish = (path) => {
-    const clean = String(path || '').replace(/^\//,'').replace(/\.md$/i,'');
-    return encodeURI(clean).replace(/%20/g, '+').replace(/&/g, '%26');
+    const clean = String(path || '').replace(/^\//, '').replace(/\.md$/i, '');
+    return encodeURI(clean)
+      .replace(/%20/g, '+')
+      .replace(/&/g, '%26');
   };
 
   const mkLink = (item, label) => {
@@ -63,13 +113,19 @@
     const nav = document.createElement('nav');
     nav.className = NAV_CLASS;
     nav.setAttribute('aria-label', 'Note navigation');
+
     const sep = () => {
       const s = document.createElement('span');
       s.className = `${NAV_CLASS}__sep`;
       s.textContent = ' | ';
       return s;
     };
-    nav.append(mkLink(prev,'Prev'), sep(), mkLink(contents,'Contents'), sep(), mkLink(next,'Next'));
+
+    nav.append(
+      mkLink(prev, 'Prev'), sep(),
+      mkLink(contents, 'Contents'), sep(),
+      mkLink(next, 'Next')
+    );
     return nav;
   };
 
@@ -80,46 +136,53 @@
         ? decodeURIComponent(raw)
         : raw;
     } catch {
-      try { return decodeURIComponent(raw.replace(/%(?![0-9A-Fa-f]{2})/g, '%25')); }
-      catch { return raw; }
+      try {
+        return decodeURIComponent(raw.replace(/%(?![0-9A-Fa-f]{2})/g, '%25'));
+      } catch {
+        return raw;
+      }
     }
   };
 
   const resolveWikiPath = (target, currentSlug) => {
     const hasSlash = target.includes('/');
-    const baseFolder = currentSlug.split('/').slice(0,-1).join('/');
-    const path = hasSlash ? target : (baseFolder ? baseFolder + '/' + target : target);
-    return path.replace(/\.md$/i,'');
+    const baseFolder = currentSlug.split('/').slice(0, -1).join('/');
+    const path = hasSlash ? target : (baseFolder ? `${baseFolder}/${target}` : target);
+    return path.replace(/\.md$/i, '');
   };
 
   const guessContentsPath = (currentSlug) => {
     if (CONTENTS_PATH) return CONTENTS_PATH;
-    const baseFolder = currentSlug.split('/').slice(0,-1).join('/');
-    return (baseFolder ? baseFolder + '/' : '') + CONTENTS_TITLE.replace(/\.md$/i,'');
+    const baseFolder = currentSlug.split('/').slice(0, -1).join('/');
+    return (baseFolder ? `${baseFolder}/` : '') + CONTENTS_TITLE.replace(/\.md$/i, '');
   };
 
   // Frontmatter selectors
-  const qFrontmatterNodes = (root=document) => root.querySelectorAll([
-    '.el-pre.mod-frontmatter.mod-ui pre.language-yaml code.language-yaml',
-    '.el-pre.mod-frontmatter.mod-ui code.language-yaml',
-    'pre.frontmatter.language-yaml code.language-yaml',
-    'pre.language-yaml code.language-yaml',
-    'code.language-yaml',
-    '.frontmatter code.language-yaml',
-    '.metadata-container table',
-    '.frontmatter-container table',
-    '.frontmatter table'
-  ].join(','));
+  const qFrontmatterNodes = (root = document) =>
+    root.querySelectorAll([
+      '.el-pre.mod-frontmatter.mod-ui pre.language-yaml code.language-yaml',
+      '.el-pre.mod-frontmatter.mod-ui code.language-yaml',
+      'pre.frontmatter.language-yaml code.language-yaml',
+      'pre.language-yaml code.language-yaml',
+      'code.language-yaml',
+      '.frontmatter code.language-yaml',
+      '.metadata-container table',
+      '.frontmatter-container table',
+      '.frontmatter table'
+    ].join(','));
 
   const parseFromTokens = (codeEl) => {
-    const out = { PrevNote:null, NextNote:null };
+    const out = { PrevNote: null, NextNote: null };
     const tokens = Array.from(codeEl.querySelectorAll('.token'));
     if (!tokens.length) return out;
+
     for (let i = 0; i < tokens.length; i++) {
       const t = tokens[i];
       if (!(t.classList.contains('key') && t.classList.contains('atrule'))) continue;
+
       const key = t.textContent.trim();
       if (key !== 'PrevNote' && key !== 'NextNote') continue;
+
       let j = i + 1, strNode = null;
       while (j < tokens.length) {
         const tj = tokens[j];
@@ -128,45 +191,52 @@
         j++;
       }
       if (!strNode) continue;
-      const raw = strNode.textContent.trim().replace(/^["']|["']$/g,'');
+
+      const raw = strNode.textContent.trim().replace(/^["']|["']$/g, '');
       const m = raw.match(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/);
-      if (m) out[key] = { target: m[1].trim(), alias: (m[2]||'').trim() || null };
+      if (m) out[key] = { target: m[1].trim(), alias: (m[2] || '').trim() || null };
     }
     return out;
   };
 
   const parseFromRawText = (codeEl) => {
-    const out = { PrevNote:null, NextNote:null };
+    const out = { PrevNote: null, NextNote: null };
     const text = (codeEl.innerText || codeEl.textContent || '').replace(/&amp;/g, '&');
     const rx = /^(PrevNote|NextNote)\s*:\s*["']?\s*(\[\[[^\]]+\]\])\s*["']?\s*$/gmi;
+
     let m;
     while ((m = rx.exec(text))) {
       const key = m[1];
       const wiki = m[2];
       const mm = wiki.match(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/);
-      if (mm) out[key] = { target: mm[1].trim(), alias: (mm[2]||'').trim() || null };
+      if (mm) out[key] = { target: mm[1].trim(), alias: (mm[2] || '').trim() || null };
     }
     return out;
   };
 
   const parseFromTable = (tableEl) => {
-    const out = { PrevNote:null, NextNote:null };
+    const out = { PrevNote: null, NextNote: null };
     const rows = tableEl.querySelectorAll('tr');
+
     rows.forEach(tr => {
       const k = tr.querySelector('th, td:first-child');
       const v = tr.querySelector('td:last-child');
       if (!k || !v) return;
+
       const key = k.textContent.trim();
       if (key !== 'PrevNote' && key !== 'NextNote') return;
+
       const mm = v.textContent.match(/\[\[([^|\]]+)(?:\|([^\]]+))?\]\]/);
-      if (mm) out[key] = { target: mm[1].trim(), alias: (mm[2]||'').trim() || null };
+      if (mm) out[key] = { target: mm[1].trim(), alias: (mm[2] || '').trim() || null };
     });
+
     return out;
   };
 
-  const readPrevNextFromFrontmatter = (root=document) => {
+  const readPrevNextFromFrontmatter = (root = document) => {
     const nodes = qFrontmatterNodes(root);
-    let res = { PrevNote:null, NextNote:null };
+    let res = { PrevNote: null, NextNote: null };
+
     nodes.forEach(node => {
       if (node.tagName === 'TABLE') {
         const got = parseFromTable(node);
@@ -184,35 +254,59 @@
   };
 
   const compute = () => {
-    const currentSlug = safeCurrentSlug().replace(/\/+$/,'');
+    const currentSlug = safeCurrentSlug().replace(/\/+$/, '');
     const { PrevNote, NextNote } = readPrevNextFromFrontmatter(document);
+
     const prev = PrevNote ? {
       path: resolveWikiPath(PrevNote.target, currentSlug),
       title: PrevNote.alias || PrevNote.target
     } : null;
+
     const next = NextNote ? {
       path: resolveWikiPath(NextNote.target, currentSlug),
       title: NextNote.alias || NextNote.target
     } : null;
+
     const contentsPath = guessContentsPath(currentSlug);
     const contents = contentsPath ? { path: contentsPath, title: CONTENTS_TITLE } : null;
+
     return { prev, contents, next };
+  };
+
+  const placeTopNav = (navEl) => {
+    const wrap = document.getElementById(MAP_WRAP_ID);
+    const container = getContentContainer();
+    if (wrap) {
+      navEl.classList.add('is-top');
+      wrap.appendChild(navEl);
+    } else {
+      const first = container.firstElementChild;
+      if (first) container.insertBefore(navEl, first);
+      else container.appendChild(navEl);
+    }
+  };
+
+  const placeBottomNav = (navEl) => {
+    const container = getContentContainer();
+    const backlinks = container.querySelector('div.backlinks') || document.querySelector('div.backlinks');
+    if (backlinks) {
+      backlinks.parentNode.insertBefore(navEl, backlinks);
+    } else {
+      container.appendChild(navEl);
+    }
   };
 
   const mount = () => {
     ensureStyle();
     document.querySelectorAll(`.${NAV_CLASS}`).forEach(n => n.remove());
-    const container =
-      document.querySelector('#content') ||
-      document.querySelector('.markdown-preview-view') ||
-      document.querySelector('.markdown-preview-section') ||
-      document.body;
+
     const { prev, contents, next } = compute();
+
     const topNav = mkNav(prev, contents, next);
-    const firstBlock = container.firstElementChild;
-    if (firstBlock) container.insertBefore(topNav, firstBlock);
-    else container.appendChild(topNav);
-    container.appendChild(mkNav(prev, contents, next));
+    placeTopNav(topNav);
+
+    const bottomNav = mkNav(prev, contents, next);
+    placeBottomNav(bottomNav);
   };
 
   const frontmatterReady = () => qFrontmatterNodes(document).length > 0;
@@ -222,17 +316,22 @@
     const obs = new MutationObserver(() => {
       if (frontmatterReady()) { obs.disconnect(); cb(); }
     });
-    obs.observe(document.documentElement, { childList:true, subtree:true });
-    setTimeout(() => { if (frontmatterReady()) { obs.disconnect(); cb(); } }, 2000);
+    obs.observe(document.documentElement, { childList: true, subtree: true });
+    setTimeout(() => {
+      if (frontmatterReady()) { obs.disconnect(); cb(); }
+    }, 2000);
   };
 
-  const debounced = (fn, ms=80) => {
-    let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); };
+  const debounced = (fn, ms = 80) => {
+    let t;
+    return () => { clearTimeout(t); t = setTimeout(fn, ms); };
   };
 
   const boot = () => {
     if (localStorage.getItem('nav:disable') === '1' || window.NAV_DISABLE) return;
+
     waitForFrontmatter(mount);
+
     let lastPath = location.pathname;
     setInterval(() => {
       if (location.pathname !== lastPath) {
@@ -240,16 +339,15 @@
         waitForFrontmatter(mount);
       }
     }, 150);
+
     const recompute = debounced(() => waitForFrontmatter(mount), 120);
-    const container =
-      document.querySelector('#content') ||
-      document.body;
+    const container = getContentContainer();
     const obs = new MutationObserver(recompute);
-    obs.observe(container, { childList:true, subtree:true });
+    obs.observe(container || document.body, { childList: true, subtree: true });
   };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot, { once:true });
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
   } else {
     boot();
   }
