@@ -170,6 +170,9 @@
       body.theme-dark{
         --side-map-filter: brightness(.78) contrast(1.05) saturate(.9);
       }
+      .site-body-right-column {
+        padding-top: 32px;
+      }
 
       /* Whole block (map + meta) */
       #${BLOCK_ID}{
@@ -197,7 +200,8 @@
         margin-top: .35rem;
         font-size: var(--font-small, .85rem);
         color: var(--text-muted, inherit);
-        display:flex;
+        display: flex;
+        flex-direction: column
         align-items:center;
         gap: .4rem;
         line-height: 1.25;
