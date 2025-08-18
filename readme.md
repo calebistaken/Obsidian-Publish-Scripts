@@ -1,6 +1,5 @@
 ---
-copyright: Caleb Davis. All rights reserved.
-date_modified: 2025-08-13T10:15:42-07:00
+date_modified: 2025-08-18T14:43:28-07:00
 title: readme
 url: https://adventurestories.cc
 ---

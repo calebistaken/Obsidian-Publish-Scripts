@@ -1,6 +1,6 @@
 /**
  * Prev | Contents | Next navigation for Obsidian Publish (custom domain safe)
- * - Centers inside markdown content width (not screen)
+ * - Centers inside markdown content width (uses .markdown-preview-sizer)
  * - Top nav mounts at top of markdown content (not over a banner)
  * - Bottom nav mounts just above div.backlinks
  * - Works with frontmatter PrevNote / NextNote
@@ -8,6 +8,8 @@
  * Optional globals:
  *   window.CONTENTS_TITLE
  *   window.CONTENTS_PATH
+ *   window.NAV_HR_TOP     // boolean: show <hr> under top nav
+ *   window.NAV_HR_BOTTOM  // boolean: show <hr> above bottom nav
  */
 
 (() => {
@@ -25,15 +27,20 @@
       ? window.CONTENTS_PATH.trim().replace(/^\//,'').replace(/\.md$/i,'')
       : null;
 
+  const SHOW_HR_TOP    = !!window.NAV_HR_TOP;
+  const SHOW_HR_BOTTOM = !!window.NAV_HR_BOTTOM;
+
   // Use your custom domain if present
   const BASE_ORIGIN = (window.siteInfo && window.siteInfo.customurl)
     ? ('https://' + window.siteInfo.customurl.replace(/^https?:\/\//,'').replace(/\/$/,''))
     : (location.origin || 'https://publish.obsidian.md');
 
+  // Prefer the true markdown column sizer
   const getContentContainer = () =>
+    document.querySelector('.markdown-preview-sizer') ||
+    document.querySelector('.markdown-preview-view .markdown-preview-section') ||
     document.querySelector('#content') ||
     document.querySelector('.markdown-preview-view') ||
-    document.querySelector('.markdown-preview-section') ||
     document.body;
 
   const ensureStyle = () => {
@@ -44,6 +51,7 @@
       :root{
         --nav-font-size: var(--font-normal, 1rem);
         --nav-gap: .35rem;
+        --nav-rule-color: var(--background-modifier-border, rgba(127,127,127,.35));
       }
       /* Center within the markdown column */
       .${NAV_CLASS}{
@@ -63,6 +71,11 @@
       .${NAV_CLASS}__sep{ opacity:.6; }
       .${NAV_CLASS}__link:not([href]){
         opacity:.4; pointer-events:none; text-decoration:none;
+      }
+      .${NAV_CLASS}__rule{
+        border:0;
+        border-top:1px solid var(--nav-rule-color);
+        margin:.5rem 0 1rem 0;
       }
     `;
     document.head.appendChild(style);
@@ -100,6 +113,14 @@
       mkLink(next,'Next')
     );
     return nav;
+  };
+
+  const mkRule = () => {
+    const hr = document.createElement('hr');
+    hr.className = `${NAV_CLASS}__rule`;
+    hr.setAttribute('role', 'separator');
+    hr.setAttribute('aria-hidden', 'true');
+    return hr;
   };
 
   const safeCurrentSlug = () => {
@@ -228,28 +249,47 @@
   };
 
   // --------- placement ----------
-  const placeTopNav = (navEl) => {
+  const placeTopNav = (navEl, ruleEl) => {
     const container = getContentContainer();
-    const first = container.firstElementChild;
-    if (first) container.insertBefore(navEl, first);
-    else container.appendChild(navEl);
+    // Insert as the first child inside the markdown column
+    if (container.firstElementChild) {
+      container.insertBefore(navEl, container.firstElementChild);
+      if (ruleEl) container.insertBefore(ruleEl, navEl.nextSibling);
+    } else {
+      container.appendChild(navEl);
+      if (ruleEl) container.appendChild(ruleEl);
+    }
   };
 
-  const placeBottomNav = (navEl) => {
+  const placeBottomNav = (navEl, ruleEl) => {
     const container = getContentContainer();
     const backlinks = container.querySelector('div.backlinks') || document.querySelector('div.backlinks');
-    if (backlinks) backlinks.parentNode.insertBefore(navEl, backlinks);
-    else container.appendChild(navEl);
+    if (backlinks) {
+      // Rule goes directly before nav, which goes before backlinks
+      if (ruleEl) backlinks.parentNode.insertBefore(ruleEl, backlinks);
+      backlinks.parentNode.insertBefore(navEl, backlinks);
+    } else {
+      if (ruleEl) container.appendChild(ruleEl);
+      container.appendChild(navEl);
+    }
   };
 
   const mount = () => {
     ensureStyle();
-    document.querySelectorAll(`.${NAV_CLASS}`).forEach(n => n.remove());
+    // Clean previous runs
+    document.querySelectorAll(`.${NAV_CLASS}, .${NAV_CLASS}__rule`).forEach(n => n.remove());
+
     const { prev, contents, next } = compute();
+
+    // Top
     const top = mkNav(prev, contents, next);
-    placeTopNav(top);
+    const topRule = SHOW_HR_TOP ? mkRule() : null;
+    placeTopNav(top, topRule);
+
+    // Bottom
     const bottom = mkNav(prev, contents, next);
-    placeBottomNav(bottom);
+    const bottomRule = SHOW_HR_BOTTOM ? mkRule() : null;
+    placeBottomNav(bottom, bottomRule);
   };
 
   // --------- boot ----------
