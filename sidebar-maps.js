@@ -13,8 +13,8 @@
  *
  * Optional globals:
  *   window.MAP_ZOOM         (default 12)
- *   window.SIDE_MAP_HEIGHT  (default 140 px)
- *   window.SIDE_MAP_MIN_VW  (default 750)
+ *   window.SIDE_MAP_HEIGHT  (default 400 px)
+ *   window.SIDE_MAP_MIN_VW  (default 0)
  */
 
 (() => {
@@ -25,8 +25,8 @@
   const META_ID   = 'side-map-meta';
 
   const MAP_ZOOM   = Number.isFinite(window.MAP_ZOOM) ? window.MAP_ZOOM : 12;
-  const MAP_HEIGHT = Number.isFinite(window.SIDE_MAP_HEIGHT) ? window.SIDE_MAP_HEIGHT : 140;
-  const MIN_VW     = Number.isFinite(window.SIDE_MAP_MIN_VW) ? window.SIDE_MAP_MIN_VW : 750;
+  const MAP_HEIGHT = Number.isFinite(window.SIDE_MAP_HEIGHT) ? window.SIDE_MAP_HEIGHT : 400;
+  const MIN_VW     = Number.isFinite(window.SIDE_MAP_MIN_VW) ? window.SIDE_MAP_MIN_VW : 0;
 
   // ---------- DOM helpers ----------
   const getRightInner = () =>
@@ -183,7 +183,8 @@
       #${WRAP_ID}{
         position:relative;
         width:100%;
-        height:var(--side-map-h);
+        aspect-ratio: 1 / 1;          /* square by default */
+        max-height:var(--side-map-h); /* cap the height */
         border-radius: var(--side-map-radius);
         overflow:hidden;
         background: var(--side-map-bg);
