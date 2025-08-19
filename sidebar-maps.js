@@ -6,8 +6,11 @@
  * - Inline metadata below the map: "<Place, Country> • <date>".
  * - Loads only for wide viewports (>= 750px) to save resources.
  *
- * Frontmatter fields used:
- *   map_link: Apple/Google/OSM URL with coordinates (required to render map)
+ * Frontmatter fields used (in priority order):
+ *   1) lat  : number
+ *      lng  : number
+ *   2) location : [lat, lng]   (single-line YAML array)
+ *   3) map_link : Apple/Google/OSM URL with coordinates
  *   address : comma-separated string; we render "first, last-non-zip"
  *   date    : string; rendered inline after a " • "
  *
@@ -53,6 +56,26 @@
     '.frontmatter-container table',
     '.frontmatter table'
   ].join(','));
+
+  const getFMPlainText = () => {
+    const nodes = qFM(document);
+    let out = '';
+    for (const n of nodes) {
+      if (n.tagName === 'TABLE') {
+        // flatten table key/value rows to "key: value" lines
+        for (const tr of n.querySelectorAll('tr')) {
+          const k = tr.querySelector('th, td:first-child');
+          const v = tr.querySelector('td:last-child');
+          if (k && v) {
+            out += `${k.textContent.trim()}: ${v.textContent.trim()}\n`;
+          }
+        }
+      } else {
+        out += (n.innerText || n.textContent || '') + '\n';
+      }
+    }
+    return out.replace(/&amp;/g, '&');
+  };
 
   const readFMField = (fieldName) => {
     const nodes=qFM(document);
@@ -102,6 +125,32 @@
   const toFloat = (s)=>{const n=parseFloat(String(s).trim());return Number.isFinite(n)?n:null;};
   const pair = (s)=>{ if(!s) return null; const m=String(s).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/); if(!m) return null; const lat=toFloat(m[1]), lon=toFloat(m[2]); return (lat==null||lon==null)?null:{lat,lon}; };
   const qobj = (u)=>{const o=Object.create(null); for (const [k,v] of u.searchParams.entries()) o[k]=v; return o;};
+
+  // NEW: read coordinates directly from frontmatter
+  const readCoordsFromFM = () => {
+    // 1) Separate lat/lng keys
+    const latStr = readFMField('lat');
+    const lngStr = readFMField('lng'); // user explicitly asked for "lng"
+    const lat = toFloat(latStr);
+    const lon = toFloat(lngStr);
+    if (lat != null && lon != null) return { lat, lon };
+
+    // 2) Single "location: [lat, lng]" line
+    const fmText = getFMPlainText();
+    // match single-line array form
+    const m = fmText.match(/^\s*location\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]\s*$/mi);
+    if (m) {
+      const a = toFloat(m[1]), b = toFloat(m[2]);
+      if (a != null && b != null) return { lat: a, lon: b };
+    }
+
+    // 3) If table rendered "location" cell contains "[.., ..]" we can parse that via readFMField too
+    const locInline = readFMField('location');
+    const p = pair(locInline);
+    if (p) return p;
+
+    return null;
+  };
 
   const normalizeMap = (raw) => {
     let href=(raw||'').replace(/&amp;/g,'&').trim();
@@ -202,7 +251,7 @@
         font-size: var(--font-small, .85rem);
         color: var(--text-muted, inherit);
         display: flex;
-        flex-direction: column
+        flex-direction: column;
         align-items:center;
         gap: .4rem;
         line-height: 1.25;
@@ -279,10 +328,17 @@
 
     ensureStyle();
 
-    const raw = readMapLink();
-    const info = raw && normalizeMap(raw);
+    // === NEW PRIORITY ORDER: lat/lng → location → map_link ===
+    let coords = readCoordsFromFM();
+    if (!coords) {
+      const raw = readMapLink();
+      const info = raw && normalizeMap(raw);
+      if (info && info.lat != null && info.lon != null) {
+        coords = { lat: info.lat, lon: info.lon };
+      }
+    }
 
-    if (!info || info.lat==null || info.lon==null || !shouldShowMap()) {
+    if (!coords || !shouldShowMap()) {
       unmountSideMap();
       installing = false;
       return;
@@ -292,7 +348,7 @@
     const addrStr = readAddressStr();
     const locTxt  = formatLocationFromAddress(addrStr);
 
-    mountSideMap(info.lat, info.lon, locTxt, dateStr);
+    mountSideMap(coords.lat, coords.lon, locTxt, dateStr);
     installing = false;
   };
 
