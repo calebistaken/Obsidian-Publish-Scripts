@@ -1,0 +1,135 @@
+/* ===============================
+   CONFIG: mirror Publish widths
+   (fallbacks if theme doesn't set these)
+   =============================== */
+:root {
+  --publish-left-sidebar-width:  280px; /* fallback */
+  --publish-right-sidebar-width: 320px; /* fallback */
+  --sidebar-slide-duration: 180ms;
+  --sidebar-slide-ease: ease;
+}
+
+/* Ensure sidebars animate smoothly */
+.site-body-left-column,
+.site-body-right-column {
+  transition:
+    transform var(--sidebar-slide-duration) var(--sidebar-slide-ease),
+    opacity   var(--sidebar-slide-duration) var(--sidebar-slide-ease);
+  will-change: transform, opacity;
+}
+
+/* ================
+   ≤750px: overlay BOTH sides
+   ================ */
+@media (max-width: 750px) {
+  .site-body-left-column,
+  .site-body-right-column {
+    position: fixed;                     /* overlay */
+    top: 0;
+    bottom: 0;
+    z-index: 1001;                       /* above content & header buttons */
+    opacity: 1;
+    pointer-events: auto;
+    background: var(--background-primary, inherit); /* prevent see-through flicker */
+    box-shadow: 0 0 16px rgba(0,0,0,0.2);
+  }
+
+  .site-body-left-column {
+    left: 0;
+    width: var(--publish-left-sidebar-width);
+    transform: translateX(-100%);
+  }
+
+  .site-body-right-column {
+    right: 0;
+    width: var(--publish-right-sidebar-width);
+    transform: translateX(100%);
+  }
+
+  /* Body flags from the JS toggle */
+  .left-sidebar-hidden  .site-body-left-column  { transform: translateX(-100%); opacity: 0.01; pointer-events: none; }
+  .right-sidebar-hidden .site-body-right-column { transform: translateX( 100%); opacity: 0.01; pointer-events: none; }
+
+  /* When visible (JS removes the hidden class), slide in over content */
+  :not(.left-sidebar-hidden)  .site-body-left-column  { transform: translateX(0); opacity: 1; }
+  :not(.right-sidebar-hidden) .site-body-right-column { transform: translateX(0); opacity: 1; }
+
+  /* Center column stays put; no squeezing on overlay */
+  .site-body-center-column {
+    transform: none !important;
+  }
+}
+
+/* ==========================
+   751–1000px: left is permanent (default),
+   right overlays content when toggled
+   ========================== */
+@media (min-width: 751px) and (max-width: 1000px) {
+  /* Left: default layout (no overlay), never forced hidden */
+  .left-sidebar-hidden .site-body-left-column {
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+
+  /* Right: overlay like on mobile */
+  .site-body-right-column {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: var(--publish-right-sidebar-width);
+    z-index: 1001;
+    background: var(--background-primary, inherit);
+    box-shadow: 0 0 16px rgba(0,0,0,0.2);
+    transform: translateX(100%);   /* start hidden off-canvas */
+    pointer-events: none;
+  }
+
+  /* Slide in when visible (body class removed by JS) */
+  :not(.right-sidebar-hidden) .site-body-right-column {
+    transform: translateX(0);
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .right-sidebar-hidden .site-body-right-column {
+    transform: translateX(100%);
+    opacity: 0.01;
+    pointer-events: none;
+  }
+
+  /* Left column + center column keep native Publish layout (content shifts to accommodate left only) */
+}
+
+/* ==========================
+   >1000px: both permanent — revert to default layout
+   ========================== */
+@media (min-width: 1001px) {
+  .site-body-left-column,
+  .site-body-right-column {
+    position: static !important;         /* back to normal flow */
+    transform: none !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    box-shadow: none !important;
+  }
+
+  /* Hide our custom right-toggle button on desktop */
+  #right-sidebar-toggle { display: none !important; }
+}
+
+/* Safety: if our right button ends up outside the header, pin it */
+body > #right-sidebar-toggle.sidebar-toggle-button.mod-right {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 1100; /* above overlay panes */
+}
+
+@media (max-width: 520px) {
+  body > #right-sidebar-toggle.sidebar-toggle-button.mod-right {
+    top: 10px;
+    right: 8px;
+  }
+}
