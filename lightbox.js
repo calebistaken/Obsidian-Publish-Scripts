@@ -1,9 +1,9 @@
 /**
- * Zoomable images
+ * Zoomable images + bottom thumbnail strip
 **/
 (() => {
-  if (window.__obsZoomBoundV3) return;
-  window.__obsZoomBoundV3 = true;
+  if (window.__obsZoomBoundV4) return;
+  window.__obsZoomBoundV4 = true;
 
   const SELECTOR_MEDIA =
     '.markdown-rendered .image-embed img, .markdown-rendered .video-embed video';
@@ -33,6 +33,28 @@
       prev.load?.();
     }
     wrap.innerHTML = '';
+  }
+
+  function scrollThumbIntoView(idx) {
+    const overlay = document.querySelector('.zoom-overlay');
+    if (!overlay) return;
+    const thumbs = overlay.querySelector('.zoom-overlay__thumbs');
+    const active = thumbs?.querySelector(`[data-index="${idx}"]`);
+    if (!active || !thumbs) return;
+    const aRect = active.getBoundingClientRect();
+    const tRect = thumbs.getBoundingClientRect();
+    if (aRect.left < tRect.left || aRect.right > tRect.right) {
+      thumbs.scrollTo({ left: active.offsetLeft - 16, behavior: 'smooth' });
+    }
+  }
+
+  function updateThumbActive(idx) {
+    const overlay = document.querySelector('.zoom-overlay');
+    if (!overlay) return;
+    overlay.querySelectorAll('.zoom-thumb').forEach(el => {
+      el.classList.toggle('is-active', Number(el.dataset.index) === idx);
+    });
+    scrollThumbIntoView(idx);
   }
 
   function renderAt(index) {
@@ -68,6 +90,8 @@
     const cap = captionFor(srcEl);
     captionEl.textContent = cap || '';
     captionEl.style.display = cap ? '' : 'none';
+
+    updateThumbActive(currentIndex);
   }
 
   function closeOverlay() {
@@ -80,8 +104,47 @@
     currentIndex = -1;
   }
 
-  function showNext() { renderAt(currentIndex + 1); }
-  function showPrev() { renderAt(currentIndex - 1); }
+  const showNext = () => renderAt(currentIndex + 1);
+  const showPrev = () => renderAt(currentIndex - 1);
+
+  function buildThumb(el, idx) {
+    const isVideo = el.tagName.toLowerCase() === 'video';
+    const btn = document.createElement('button');
+    btn.className = 'zoom-thumb';
+    btn.type = 'button';
+    btn.dataset.index = String(idx);
+    btn.setAttribute('aria-label', `View media ${idx + 1}`);
+
+    let thumb;
+    if (isVideo) {
+      thumb = document.createElement('video');
+      thumb.src = el.currentSrc || el.src;
+      thumb.muted = true;
+      thumb.playsInline = true;
+      thumb.loop = true;
+      thumb.autoplay = true; // silent preview
+      thumb.className = 'zoom-thumb__media';
+      const badge = document.createElement('span');
+      badge.className = 'zoom-thumb__badge';
+      badge.textContent = '▶';
+      btn.appendChild(thumb);
+      btn.appendChild(badge);
+    } else {
+      thumb = document.createElement('img');
+      thumb.src = el.currentSrc || el.src;
+      thumb.alt = el.alt || '';
+      thumb.loading = 'lazy';
+      thumb.decoding = 'async';
+      thumb.className = 'zoom-thumb__media';
+      btn.appendChild(thumb);
+    }
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      renderAt(idx);
+    });
+    return btn;
+  }
 
   function buildOverlay(startIndex) {
     const overlay = document.createElement('div');
@@ -111,8 +174,22 @@
     const captionEl = document.createElement('div');
     captionEl.className = 'zoom-overlay__caption';
 
+    // --- Thumbnail strip (bottom) ---
+    const thumbsWrap = document.createElement('div');
+    thumbsWrap.className = 'zoom-overlay__thumbs';
+    const track = document.createElement('div');
+    track.className = 'zoom-overlay__thumbs-track';
+    thumbsWrap.appendChild(track);
+
+    // Build thumbs from current mediaList
+    mediaList.forEach((el, idx) => {
+      track.appendChild(buildThumb(el, idx));
+    });
+
     inner.appendChild(mediaWrap);
     inner.appendChild(captionEl);
+    inner.appendChild(thumbsWrap);
+
     overlay.appendChild(navLeft);
     overlay.appendChild(navRight);
     overlay.appendChild(closeBtn);
