@@ -1,9 +1,13 @@
 /**
- * Zoomable images + bottom thumbnail strip
+ * Zoomable images + fixed bottom thumbnail filmstrip
+ * - Filmstrip pinned to window bottom (with safe-area + standard gap)
+ * - Active thumbnail smoothly scrolls to center when possible
+ * - Left/right nav zones avoid the filmstrip area
+ * - Keeps your existing .is-active highlight behavior (we toggle it)
 **/
 (() => {
-  if (window.__obsZoomBoundV4) return;
-  window.__obsZoomBoundV4 = true;
+  if (window.__obsZoomBoundV6) return;
+  window.__obsZoomBoundV6 = true;
 
   const SELECTOR_MEDIA =
     '.markdown-rendered .image-embed img, .markdown-rendered .video-embed video';
@@ -35,26 +39,28 @@
     wrap.innerHTML = '';
   }
 
-  function scrollThumbIntoView(idx) {
-    const overlay = document.querySelector('.zoom-overlay');
+  // Smoothly center the active thumbnail in the fixed strip
+  function centerThumb(idx, behavior = 'smooth') {
+    const overlay  = document.querySelector('.zoom-overlay');
     if (!overlay) return;
-    const thumbs = overlay.querySelector('.zoom-overlay__thumbs');
-    const active = thumbs?.querySelector(`[data-index="${idx}"]`);
-    if (!active || !thumbs) return;
-    const aRect = active.getBoundingClientRect();
-    const tRect = thumbs.getBoundingClientRect();
-    if (aRect.left < tRect.left || aRect.right > tRect.right) {
-      thumbs.scrollTo({ left: active.offsetLeft - 16, behavior: 'smooth' });
-    }
+    const scroller = overlay.querySelector('.zoom-overlay__thumbs');
+    const active   = scroller?.querySelector(`[data-index="${idx}"]`);
+    if (!active || !scroller) return;
+
+    const targetLeft = active.offsetLeft - (scroller.clientWidth - active.clientWidth) / 2;
+    const maxScroll  = scroller.scrollWidth - scroller.clientWidth;
+    const clamped    = Math.max(0, Math.min(maxScroll, targetLeft));
+    scroller.scrollTo({ left: clamped, behavior });
   }
 
+  // Toggle highlight class and center the active thumb
   function updateThumbActive(idx) {
     const overlay = document.querySelector('.zoom-overlay');
     if (!overlay) return;
     overlay.querySelectorAll('.zoom-thumb').forEach(el => {
       el.classList.toggle('is-active', Number(el.dataset.index) === idx);
     });
-    scrollThumbIntoView(idx);
+    centerThumb(idx, 'smooth');
   }
 
   function renderAt(index) {
@@ -174,7 +180,7 @@
     const captionEl = document.createElement('div');
     captionEl.className = 'zoom-overlay__caption';
 
-    // --- Thumbnail strip (bottom) ---
+    // --- Thumbnail strip (fixed bottom) ---
     const thumbsWrap = document.createElement('div');
     thumbsWrap.className = 'zoom-overlay__thumbs';
     const track = document.createElement('div');
