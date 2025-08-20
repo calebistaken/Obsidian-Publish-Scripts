@@ -1,22 +1,29 @@
 /**
  * Zoomable images + fixed bottom thumbnail filmstrip
- * - Filmstrip pinned to window bottom (with safe-area + standard gap)
- * - Active thumbnail smoothly scrolls to center when possible
- * - Left/right nav zones avoid the filmstrip area
- * - Keeps your existing .is-active highlight behavior (we toggle it)
+ * - Direct-jump on thumbnail click (no incremental stepping)
+ * - Drag-to-scroll filmstrip (mouse/touch/pen)
+ * - Active thumbnail smoothly centers in view
+ * - Nav zones avoid the filmstrip area
 **/
 (() => {
-  if (window.__obsZoomBoundV6) return;
-  window.__obsZoomBoundV6 = true;
+  if (window.__obsZoomBoundV7) return;
+  window.__obsZoomBoundV7 = true;
 
   const SELECTOR_MEDIA =
     '.markdown-rendered .image-embed img, .markdown-rendered .video-embed video';
 
   const looksLikeFilename = (alt) =>
-    !!alt && /\.(png|jpe?g|tiff?|webp|gif|svg|mov|mp4|webm)$/i.test(alt.trim());
+    !!alt && /\.(png|jpe?g|tiff?|webp|gif|svg|mov|mp4|webm)$/i.test(alt?.trim?.() || '');
 
   let mediaList = [];
   let currentIndex = -1;
+
+  // --- drag state for filmstrip ---
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartScrollLeft = 0;
+  let dragMovedPx = 0;
+  const DRAG_CLICK_CANCEL_THRESHOLD = 6; // px
 
   function collectMedia() {
     const root = document.querySelector('.markdown-rendered') || document;
@@ -47,13 +54,13 @@
     const active   = scroller?.querySelector(`[data-index="${idx}"]`);
     if (!active || !scroller) return;
 
-    const targetLeft = active.offsetLeft - (scroller.clientWidth - active.clientWidth) / 2;
-    const maxScroll  = scroller.scrollWidth - scroller.clientWidth;
-    const clamped    = Math.max(0, Math.min(maxScroll, targetLeft));
+    const activeCenter = active.offsetLeft + active.clientWidth / 2;
+    const targetLeft   = activeCenter - scroller.clientWidth / 2;
+    const maxScroll    = scroller.scrollWidth - scroller.clientWidth;
+    const clamped      = Math.max(0, Math.min(maxScroll, targetLeft));
     scroller.scrollTo({ left: clamped, behavior });
   }
 
-  // Toggle highlight class and center the active thumb
   function updateThumbActive(idx) {
     const overlay = document.querySelector('.zoom-overlay');
     if (!overlay) return;
@@ -145,11 +152,55 @@
       btn.appendChild(thumb);
     }
 
+    // Direct jump to clicked index; ignore if we were dragging
     btn.addEventListener('click', (e) => {
+      if (dragMovedPx > DRAG_CLICK_CANCEL_THRESHOLD) return; // treat as drag, not click
+      e.preventDefault();
       e.stopPropagation();
-      renderAt(idx);
+      const targetIdx = Number(btn.dataset.index);
+      renderAt(targetIdx);
     });
+
     return btn;
+  }
+
+  function attachDragHandlers(scroller) {
+    // Pointer events unify mouse/touch/pen
+    scroller.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      isDragging = true;
+      dragMovedPx = 0;
+      dragStartX = e.clientX;
+      dragStartScrollLeft = scroller.scrollLeft;
+      scroller.classList.add('dragging');
+      scroller.setPointerCapture(e.pointerId);
+    });
+
+    scroller.addEventListener('pointermove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragStartX;
+      dragMovedPx = Math.max(dragMovedPx, Math.abs(dx));
+      scroller.scrollLeft = dragStartScrollLeft - dx;
+    }, { passive: true });
+
+    function endDrag(e) {
+      if (!isDragging) return;
+      isDragging = false;
+      scroller.classList.remove('dragging');
+      try { scroller.releasePointerCapture(e.pointerId); } catch (_) {}
+      // If we dragged, we already prevent selecting via click handler guard
+    }
+
+    scroller.addEventListener('pointerup', endDrag);
+    scroller.addEventListener('pointercancel', endDrag);
+    scroller.addEventListener('pointerleave', endDrag);
+
+    // Optional: Shift+wheel to scroll horizontally on desktop mice
+    scroller.addEventListener('wheel', (e) => {
+      if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) return; // let normal vertical wheel pass
+      // Horizontal wheel (e.g., trackpads) should scroll smoothly
+      // Let the browser handle it; no preventDefault to keep inertia
+    }, { passive: true });
   }
 
   function buildOverlay(startIndex) {
@@ -213,17 +264,20 @@
     });
 
     // Nav zones
-    navLeft.addEventListener('click', (e) => { e.stopPropagation(); showPrev(); });
-    navRight.addEventListener('click', (e) => { e.stopPropagation(); showNext(); });
+    navLeft.addEventListener('click', (e) => { e.stopPropagation(); renderAt(currentIndex - 1); });
+    navRight.addEventListener('click', (e) => { e.stopPropagation(); renderAt(currentIndex + 1); });
 
     // Keys
     const onKey = (e) => {
-      if (e.key === 'ArrowRight') { e.preventDefault(); showNext(); }
-      else if (e.key === 'ArrowLeft') { e.preventDefault(); showPrev(); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); renderAt(currentIndex + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); renderAt(currentIndex - 1); }
       else if (e.key === 'Escape') { e.preventDefault(); closeOverlay(); }
     };
     document.addEventListener('keydown', onKey);
     overlay.__onKey = onKey;
+
+    // Enable drag-to-scroll on the filmstrip
+    attachDragHandlers(thumbsWrap);
 
     overlay.focus();
     renderAt(startIndex);
