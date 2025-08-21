@@ -1,16 +1,17 @@
 /**
  * Obsidian Publish — Lightbox with fixed filmstrip, H1 title, H2 section, and sidebar map as last item
- * Fixes:
- * - Black filmstrip background (no white)
- * - Multiple thumb selections in a row
- * - Map alt text pulls the rendered location string
- * - Portrait/square images bounded to viewport (no overlap/off-screen)
+ * - Click any image/video in .markdown-rendered to open
+ * - Filmstrip: drag-to-scroll (mouse/touch/pen) + click thumbs to jump
+ * - Keyboard: ← → navigate, Esc close
+ * - Header shows NOTE TITLE (line 1) and current image's H2 (line 2)
+ * - Appends sidebar map <iframe> as final gallery item; map alt = text from #side-map-place .place
+ * - Portrait/square media clamped to viewport (no overlap with filmstrip)
  */
 (() => {
-  if (window.__obsZoomBound_Polished) return;
-  window.__obsZoomBound_Polished = true;
+  if (window.__obsZoomBound_FinalFix) return;
+  window.__obsZoomBound_FinalFix = true;
 
-  // ==================== CSS ====================
+  /* ==================== CSS ==================== */
   const CSS = `
 :root{
   --zoom-thumb-height: 100px;
@@ -26,7 +27,6 @@
 
 .zoom-overlay{
   position: fixed; inset: 0;
-  display: block; /* simpler, no grid sizing surprises */
   background: rgba(0,0,0,.88);
   z-index: 9999;
   -webkit-backdrop-filter: blur(8px);
@@ -64,9 +64,9 @@ body.zoom-open{ overflow: hidden; }
 }
 .zoom-overlay__close:hover{ color: #fff; }
 
-/* Reserve space for header + filmstrip using measured header height */
+/* Layout reserves header & filmstrip space */
 .zoom-overlay__inner{
-  position: fixed; inset: 0; /* fill viewport; we'll pad inside */
+  position: fixed; inset: 0;
   padding-top: calc(var(--zoom-header-actual-h) + var(--zoom-gap));
   padding-bottom: calc(var(--zoom-thumbs-total-height) + var(--zoom-gap));
   display: grid; place-items: center;
@@ -75,27 +75,20 @@ body.zoom-open{ overflow: hidden; }
 
 /* Main media area */
 .zoom-overlay__wrap{
-  width: 100%;
-  height: 100%;
+  width: 100%; height: 100%;
   display: grid; place-items: center;
-  box-sizing: border-box;
 }
 .zoom-overlay__media, .zoom-overlay__media--frame{
   max-width: 100vw;
-  /* Strict clamp: viewport minus header minus filmstrip minus gaps */
   max-height: calc(100vh - var(--zoom-header-actual-h) - var(--zoom-thumbs-total-height) - (2 * var(--zoom-gap)));
   object-fit: contain;
   border-radius: var(--img-border-radius, 6px);
   box-shadow: 0 4px 20px rgba(0,0,0,.6);
   background: #000;
 }
-.zoom-overlay__media--frame{
-  width: 100%;
-  height: 100%;
-  border: 0;
-}
+.zoom-overlay__media--frame{ width: 100%; height: 100%; border: 0; }
 
-/* Caption */
+/* Caption (sits above filmstrip) */
 .zoom-overlay__caption{
   position: fixed;
   left: 50%; transform: translateX(-50%);
@@ -103,13 +96,11 @@ body.zoom-open{ overflow: hidden; }
   color: var(--text-muted);
   font-family: 'Alegreya SC', sans-serif;
   font-size: var(--font-ui-large);
-  line-height: 1.3; max-width: 80ch;
-  text-align: center;
+  line-height: 1.3; max-width: 80ch; text-align: center;
   padding: 4px 10px;
-  background: transparent;
 }
 
-/* Nav zones never overlap header/filmstrip */
+/* Nav zones */
 .zoom-overlay__nav{
   position: fixed; top: var(--zoom-header-actual-h); bottom: var(--zoom-thumbs-total-height);
   width: 40%; z-index: 9998;
@@ -128,7 +119,7 @@ body.zoom-open{ overflow: hidden; }
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   z-index: 10001;
-  background: rgba(0,0,0,.92);     /* ← solid dark backdrop */
+  background: rgba(0,0,0,.96);
   border-radius: 8px;
   cursor: grab; user-select: none; touch-action: pan-x;
 }
@@ -137,19 +128,19 @@ body.zoom-open{ overflow: hidden; }
   display: flex; align-items: center; gap: var(--zoom-thumb-gap); min-width: 100%;
 }
 
-/* Thumbs (ensure no white gaps) */
+/* Thumbs */
 .zoom-thumb{
   position: relative;
   display: inline-flex; align-items: center; justify-content: center;
   height: var(--zoom-thumb-height); aspect-ratio: 16/10;
-  background: #000;                 /* ← black behind every thumb */
+  background: #000;
   cursor: pointer; border-radius: var(--img-border-radius, 6px);
-  outline: 2px solid transparent; transition: box-shadow .18s ease, outline-color .18s ease, transform .18s ease;
-  touch-action: manipulation;
-  box-sizing: border-box;
+  outline: 2px solid transparent;
+  transition: box-shadow .18s ease, outline-color .18s ease, transform .18s ease;
+  touch-action: manipulation; box-sizing: border-box;
 }
 .zoom-thumb__media, .zoom-thumb__frame{
-  display: block;                   /* ← remove inline gaps */
+  display: block;
   height: 100%; width: auto; max-width: 260px;
   object-fit: cover;
   border-radius: inherit;
@@ -157,9 +148,8 @@ body.zoom-open{ overflow: hidden; }
   background: #000;
   -webkit-user-drag: none; user-drag: none; pointer-events: none;
 }
-.zoom-thumb__frame{
-  border: 0;
-}
+.zoom-thumb__frame{ border: 0; }
+
 .zoom-thumb.is-active{
   outline-color: rgba(255,255,255,.85);
   box-shadow: 0 0 0 2px rgba(255,255,255,.25), 0 6px 18px rgba(0,0,0,.4);
@@ -170,7 +160,7 @@ body.zoom-open{ overflow: hidden; }
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  // ==================== Utility & Model ====================
+  /* ==================== Utilities / Model ==================== */
   const SELECTOR_MEDIA = '.markdown-rendered .image-embed img, .markdown-rendered .video-embed video';
 
   function getSectionH2TextFor(el, root = document.querySelector('.markdown-rendered') || document) {
@@ -191,40 +181,35 @@ body.zoom-open{ overflow: hidden; }
     return alt && !looksLikeFilename ? alt : '';
   }
 
-  // Robustly pull the map label from the DOM your map script renders
+  // Map detector — exact selector you provided
   function detectSidebarMap() {
-    const wrap = document.getElementById('side-map-wrap')
-      || document.querySelector('#side-map-wrap, .side-map-wrap, [data-side-map-wrap]')
-      || document.querySelector('[data-map-wrap], .map-wrap'); // extra leeway
+    const wrap =
+      document.getElementById('side-map-wrap') ||
+      document.querySelector('#side-map-wrap, .side-map-wrap, [data-side-map-wrap]') ||
+      document.querySelector('[data-map-wrap], .map-wrap');
 
-    const iframe = document.getElementById('side-map-iframe')
-      || document.querySelector('#side-map-iframe, .side-map-iframe, [data-side-map-iframe]')
-      || (wrap && wrap.querySelector('iframe'));
+    const iframe =
+      document.getElementById('side-map-iframe') ||
+      document.querySelector('#side-map-iframe, .side-map-iframe, [data-side-map-iframe]') ||
+      (wrap && wrap.querySelector('iframe'));
 
     if (!iframe || !iframe.src) return null;
 
-    // 1) Preferred explicit location element (extend as needed)
-    let labelEl =
-      (wrap && wrap.querySelector('.sidebar-map-location, #sidebar-map-location, .side-map-location, #side-map-location, [data-map-location], .map-location, .map-label, .side-map-meta, .side-map-text, .map-meta')) ||
-      // 2) Next sibling paragraph/span below the iframe
-      iframe.nextElementSibling && /^(P|DIV|SPAN)$/i.test(iframe.nextElementSibling.tagName) ? iframe.nextElementSibling : null;
+    // Your exact location node:
+    const placeEl = document.querySelector('div#side-map-place span.place');
+    let label = placeEl?.textContent?.trim?.() || '';
 
-    let label = labelEl?.textContent?.trim?.() || '';
-
-    // 3) As a fallback, text content of the wrapper without the iframe
+    // Fallbacks if needed (kept, but your exact selector should cover it)
     if (!label && wrap) {
       const clone = wrap.cloneNode(true);
       clone.querySelector('iframe')?.remove();
       label = (clone.textContent || '').replace(/\s+/g,' ').trim();
     }
-
-    // 4) Final fallback: H1 / document.title
     if (!label) label = document.querySelector('h1')?.textContent?.trim?.() || document.title || 'Map';
 
     return { src: iframe.src, label };
   }
 
-  // Normalized gallery items
   let mediaItems = []; // [{type:'img'|'video'|'map', src, alt, caption, section}]
   let currentIndex = -1;
 
@@ -248,14 +233,14 @@ body.zoom-open{ overflow: hidden; }
       mediaItems.push({
         type: 'map',
         src: map.src,
-        alt: map.label,      // requested: use rendered location text
-        caption: map.label,  // show under the frame too (change to '' if you prefer none)
+        alt: map.label,      // exact location text
+        caption: map.label,  // show below the frame too
         section: '',
       });
     }
   }
 
-  // ==================== Rendering ====================
+  /* ==================== Rendering ==================== */
   function measureAndSetHeaderHeight(headerEl) {
     const h = headerEl?.getBoundingClientRect?.().height || 0;
     document.documentElement.style.setProperty('--zoom-header-actual-h', `${Math.ceil(h)}px`);
@@ -351,8 +336,8 @@ body.zoom-open{ overflow: hidden; }
     currentIndex = -1;
   }
 
-  // ==================== Build overlay ====================
-  // scroller drag state shared with thumb clicks
+  /* ==================== Build overlay ==================== */
+  // scroller drag state + per-thumb local thresholds
   let scrollerDragging = false;
 
   function openOverlay(startIndex) {
@@ -389,11 +374,9 @@ body.zoom-open{ overflow: hidden; }
 
     // Measure header height after mount
     const headerEl = ov.querySelector('.zoom-overlay__header');
-    requestAnimationFrame(() => {
-      measureAndSetHeaderHeight(headerEl);
-    });
+    requestAnimationFrame(() => measureAndSetHeaderHeight(headerEl));
 
-    // Build thumbnails (images/videos first, map last if present)
+    // Build thumbnails
     const track = ov.querySelector('.zoom-overlay__thumbs-track');
     mediaItems.forEach((item, idx) => {
       const btn = document.createElement('button');
@@ -413,23 +396,27 @@ body.zoom-open{ overflow: hidden; }
         thumbNode.className = 'zoom-thumb__media';
         thumbNode.src = item.src;
         if (item.type === 'video') {
-          thumbNode.muted = true;
-          thumbNode.playsInline = true;
-          thumbNode.loop = true;
-          thumbNode.autoplay = true;
+          thumbNode.muted = true; thumbNode.playsInline = true; thumbNode.loop = true; thumbNode.autoplay = true;
         } else {
-          thumbNode.alt = item.alt || '';
-          thumbNode.loading = 'lazy';
-          thumbNode.decoding = 'async';
+          thumbNode.alt = item.alt || ''; thumbNode.loading = 'lazy'; thumbNode.decoding = 'async';
         }
       }
       thumbNode.setAttribute('draggable', 'false');
       btn.appendChild(thumbNode);
       track.appendChild(btn);
 
-      // Click to jump — but only if the scroller wasn't dragging at the time
+      // Per-thumb drag vs click discrimination
+      let localDown = false, startX = 0, moved = 0;
+      btn.addEventListener('pointerdown', (e) => { localDown = true; startX = e.clientX ?? 0; moved = 0; }, { passive: true });
+      btn.addEventListener('pointermove', (e) => {
+        if (!localDown) return;
+        moved = Math.max(moved, Math.abs((e.clientX ?? 0) - startX));
+      }, { passive: true });
+      btn.addEventListener('pointerup', () => { localDown = false; }, { passive: true });
+
       btn.addEventListener('click', (e) => {
-        if (scrollerDragging) return;
+        // If the scroller is (or just was) dragging, or this thumb moved > threshold, ignore.
+        if (scrollerDragging || moved > 6) return;
         e.preventDefault();
         e.stopPropagation();
         renderAt(idx);
@@ -443,25 +430,24 @@ body.zoom-open{ overflow: hidden; }
       if (e.pointerType === 'mouse' && e.button !== 0) return;
       dragging = true;
       scrollerDragging = false;
-      sx = e.clientX;
-      sl = sc.scrollLeft;
+      sx = e.clientX; sl = sc.scrollLeft;
       sc.classList.add('dragging');
       sc.setPointerCapture?.(e.pointerId);
-      e.preventDefault(); // stop text/image drag
+      e.preventDefault();
     });
     sc.addEventListener('pointermove', (e) => {
       if (!dragging) return;
       const dx = e.clientX - sx;
-      if (!scrollerDragging && Math.abs(dx) > 4) scrollerDragging = true; // ← establish drag intent
+      if (!scrollerDragging && Math.abs(dx) > 6) scrollerDragging = true; // threshold
       sc.scrollLeft = sl - dx;
-    }, { passive: true });
+    });
     const endDrag = (e) => {
       if (!dragging) return;
       dragging = false;
-      // brief timeout so click that ends the drag won't misfire
-      setTimeout(() => { scrollerDragging = false; }, 0);
       sc.classList.remove('dragging');
       sc.releasePointerCapture?.(e.pointerId);
+      // Allow clicks immediately after pointerup if there was no significant drag
+      setTimeout(() => { scrollerDragging = false; }, 0);
     };
     sc.addEventListener('pointerup', endDrag);
     sc.addEventListener('pointercancel', endDrag);
@@ -486,12 +472,12 @@ body.zoom-open{ overflow: hidden; }
     renderAt(currentIndex);
   }
 
-  // ==================== Open from normal view (delegated) ====================
+  /* ==================== Open from normal view (delegated) ==================== */
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const media = e.target.closest(SELECTOR_MEDIA);
     if (!media) return;
-    if (media.closest('a, .internal-link, .zoom-overlay')) return; // let links or overlay behave
+    if (media.closest('a, .internal-link, .zoom-overlay')) return;
     e.preventDefault();
 
     const root = document.querySelector('.markdown-rendered') || document;
