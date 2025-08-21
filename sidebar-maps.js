@@ -7,10 +7,11 @@
  * - Loads only for wide viewports (>= 750px) to save resources.
  *
  * Frontmatter fields used (in priority order):
- *   1) lat  : number
- *      lng  : number
- *   2) location : [lat, lng]   (single-line YAML array)
- *   3) map_link : Apple/Google/OSM URL with coordinates
+ *   1) lat / lng : numbers
+ *   2) location  : [lat, lng] (single-line YAML array)
+ *   3) map_view_link : "[](geo:<a>,<b>)"  // <a>,<b> in same order as `location:` (lat,lng),
+ *                                         // but we auto-detect and swap if needed
+ *   4) map_link  : Apple/Google/OSM URL with coordinates
  *   address : comma-separated string; we render "first, last-non-zip"
  *   date    : string; rendered inline after a " • "
  *
@@ -102,9 +103,10 @@
     return null;
   };
 
-  const readMapLink = () => readFMField('map_link');
-  const readDateStr = () => readFMField('date');
-  const readAddressStr = () => readFMField('address');
+  const readMapLink      = () => readFMField('map_link');
+  const readMapViewLink  = () => readFMField('map_view_link');
+  const readDateStr      = () => readFMField('date');
+  const readAddressStr   = () => readFMField('address');
 
   // address → "first, last-non-zip"
   const formatLocationFromAddress = (addr) => {
@@ -123,10 +125,33 @@
 
   // ---------- URL/coords ----------
   const toFloat = (s)=>{const n=parseFloat(String(s).trim());return Number.isFinite(n)?n:null;};
-  const pair = (s)=>{ if(!s) return null; const m=String(s).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/); if(!m) return null; const lat=toFloat(m[1]), lon=toFloat(m[2]); return (lat==null||lon==null)?null:{lat,lon}; };
+  const pair = (s)=>{ if(!s) return null; const m=String(s).match(/(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)/); if(!m) return null; const a=toFloat(m[1]), b=toFloat(m[2]); return (a==null||b==null)?null:{a,b}; };
   const qobj = (u)=>{const o=Object.create(null); for (const [k,v] of u.searchParams.entries()) o[k]=v; return o;};
 
-  // NEW: read coordinates directly from frontmatter
+  // normalize to {lat, lon} and auto-swap if obviously reversed
+  const toLatLon = (a, b) => {
+    // prefer [lat, lon] (like your `location:` array)
+    let lat = a, lon = b;
+    const inLat = (x) => x != null && Math.abs(x) <= 90;
+    const inLon = (x) => x != null && Math.abs(x) <= 180;
+    if (!inLat(lat) || !inLon(lon)) {
+      // try swapped
+      if (inLat(b) && inLon(a)) { lat = b; lon = a; }
+    }
+    return (inLat(lat) && inLon(lon)) ? { lat, lon } : null;
+  };
+
+  // NEW: parse "[](geo:...)" from map_view_link
+  const parseGeoMarkdownLink = (raw) => {
+    if (!raw) return null;
+    // Accept things like: "[](geo:31.2304667,121.4579532)" or with spaces/quotes
+    const m = String(raw).match(/\]\(\s*geo:\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\)/i);
+    if (!m) return null;
+    const a = toFloat(m[1]), b = toFloat(m[2]);
+    return toLatLon(a, b);
+  };
+
+  // read coordinates directly from frontmatter, by priority
   const readCoordsFromFM = () => {
     // 1) Separate lat/lng keys
     const latStr = readFMField('lat');
@@ -135,19 +160,27 @@
     const lon = toFloat(lngStr);
     if (lat != null && lon != null) return { lat, lon };
 
-    // 2) Single "location: [lat, lng]" line
+    // 2) Single "location: [lat, lng]" line (or reversed; we’ll correct if needed)
     const fmText = getFMPlainText();
-    // match single-line array form
     const m = fmText.match(/^\s*location\s*:\s*\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]\s*$/mi);
     if (m) {
       const a = toFloat(m[1]), b = toFloat(m[2]);
-      if (a != null && b != null) return { lat: a, lon: b };
+      const t = toLatLon(a, b);
+      if (t) return t;
     }
 
-    // 3) If table rendered "location" cell contains "[.., ..]" we can parse that via readFMField too
+    // 3) If table rendered "location" cell contains "[.., ..]"
     const locInline = readFMField('location');
     const p = pair(locInline);
-    if (p) return p;
+    if (p) {
+      const t = toLatLon(p.a, p.b);
+      if (t) return t;
+    }
+
+    // 4) NEW: map_view_link: "[](geo:<a>,<b>)"
+    const mvl = readMapViewLink();
+    const g = parseGeoMarkdownLink(mvl);
+    if (g) return g;
 
     return null;
   };
@@ -160,20 +193,26 @@
 
     if (host.endsWith('maps.apple.com')){
       const q=qobj(u); const c=pair(q.ll||q.sll)||pair(q.q);
-      return {provider:'apple', href:u.href, ...(c||{})};
+      if (c) { const t = toLatLon(c.a, c.b); return {provider:'apple', href:u.href, ...(t||{})}; }
+      return {provider:'apple', href:u.href, lat:null, lon:null};
     }
     if (host.includes('google.') && u.pathname.toLowerCase().includes('/maps')){
       const at=u.pathname.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/);
       const q=qobj(u);
-      const c=(at && {lat:toFloat(at[1]), lon:toFloat(at[2])}) || pair(q.q) || pair(q.query);
-      return {provider:'google', href:u.href, ...(c||{})};
+      let t=null;
+      if (at) t = toLatLon(toFloat(at[1]), toFloat(at[2]));
+      if (!t) {
+        const pq = pair(q.q) || pair(q.query);
+        if (pq) t = toLatLon(pq.a, pq.b);
+      }
+      return {provider:'google', href:u.href, ...(t||{})};
     }
     if (host.includes('openstreetmap.org')){
       const q=qobj(u);
       let lat=toFloat(q.mlat), lon=toFloat(q.mlon);
       if (lat==null||lon==null){
         const m=(u.hash||'').match(/map=\d+\/(-?\d+(?:\.\d+)?)\/(-?\d+(?:\.\d+)?)/);
-        if (m){ lat=toFloat(m[1]); lon=toFloat(m[2]); }
+        if (m){ const t = toLatLon(toFloat(m[1]), toFloat(m[2])); if (t){lat=t.lat; lon=t.lon;} }
       }
       return {provider:'osm', href:u.href, lat, lon};
     }
@@ -212,55 +251,33 @@
         --side-map-gap: var(--size-4-2, .5rem);
         --side-map-radius: var(--radius-s, 6px);
         --side-map-bg: var(--background-primary, transparent);
-
-        /* Theme-aware filtering: none for light; soften for dark */
         --side-map-filter: none;
       }
       body.theme-dark{
         --side-map-filter: brightness(.78) contrast(1.05) saturate(.9);
       }
-      .site-body-right-column {
-        padding-top: 32px;
-      }
+      .site-body-right-column { padding-top: 32px; }
 
-      /* Whole block (map + meta) */
-      #${BLOCK_ID}{
-        display:block;
-        margin: 0 0 var(--side-map-gap) 0;
-      }
+      #${BLOCK_ID}{ display:block; margin: 0 0 var(--side-map-gap) 0; }
 
       #${WRAP_ID}{
-        position:relative;
-        width:100%;
-        aspect-ratio: 1 / 1;          /* square by default */
-        max-height:var(--side-map-h); /* cap the height */
+        position:relative; width:100%;
+        aspect-ratio: 1 / 1;
+        max-height:var(--side-map-h);
         border-radius: var(--side-map-radius);
-        overflow:hidden;
-        background: var(--side-map-bg);
+        overflow:hidden; background: var(--side-map-bg);
       }
       #${IFRAME_ID}{
-        position:absolute; inset:0;
-        width:100%; height:100%;
-        border:0; display:block;
-        filter: var(--side-map-filter);
+        position:absolute; inset:0; width:100%; height:100%;
+        border:0; display:block; filter: var(--side-map-filter);
       }
 
-      /* Inline meta below map */
       #${META_ID}{
-        margin-top: .35rem;
-        font-size: var(--font-small, .85rem);
+        margin-top:.35rem; font-size: var(--font-small, .85rem);
         color: var(--text-muted, inherit);
-        display: flex;
-        flex-direction: column;
-        align-items:center;
-        gap: .4rem;
-        line-height: 1.25;
-        white-space: normal;
-        word-break: break-word;
+        display:flex; flex-direction:column; align-items:center;
+        gap:.4rem; line-height:1.25; white-space:normal; word-break:break-word;
       }
-      #${META_ID} .place{ }
-      #${META_ID} .sep{ opacity:.65; }
-      #${META_ID} .date{ }
     `;
     const el=document.createElement('style');
     el.id=STYLE_ID; el.textContent=css;
@@ -295,7 +312,6 @@
   const mountSideMap = (lat, lon, locationText, dateStr) => {
     const right = getRightInner();
     if (!right) return;
-
     if (document.getElementById(BLOCK_ID)) return; // already mounted
 
     const pieces = [];
@@ -328,9 +344,11 @@
 
     ensureStyle();
 
-    // === NEW PRIORITY ORDER: lat/lng → location → map_link ===
+    // === PRIORITY ORDER: lat/lng → location → map_view_link → map_link ===
     let coords = readCoordsFromFM();
+
     if (!coords) {
+      // fallback to generic map_link
       const raw = readMapLink();
       const info = raw && normalizeMap(raw);
       if (info && info.lat != null && info.lon != null) {
