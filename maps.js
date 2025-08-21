@@ -234,14 +234,13 @@
   };
 
   const osmEmbedUrl = (lat, lon, zoom) => {
-    const { left, right, top, bottom } = bboxFor(lat, lon, zoom);
     const u = new URL('https://www.openstreetmap.org/export/embed.html');
-    u.searchParams.set('bbox', `${left},${bottom},${right},${top}`);
-    u.searchParams.set('layer', 'mapnik');
-    u.searchParams.set('marker', `${lat},${lon}`);
+    // Use explicit marker + zoom so the pin always renders and stays centered
+    u.searchParams.set('layer', 'mapnik');           // base tiles
+    u.searchParams.set('marker', `${lat},${lon}`);   // red pin
+    u.searchParams.set('zoom', String(zoom));        // view level
     return u.href;
   };
-
   // ---------- styles ----------
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
