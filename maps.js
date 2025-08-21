@@ -219,28 +219,38 @@
     return {provider:'unknown', href:u.href, lat:null, lon:null};
   };
 
-  // Simple bbox for OSM embed
-  const bboxFor = (lat, lon, zoom, pxW=300, pxH=MAP_HEIGHT) => {
+  // Safer bbox with a little padding so the marker never falls outside
+  const bboxFor = (lat, lon, zoom, pxW, pxH) => {
     const mpp = 156543.03392 * Math.cos(lat * Math.PI/180) / Math.pow(2, zoom);
     const halfWm = (pxW * mpp) / 2, halfHm = (pxH * mpp) / 2;
+    const pad = 1.15; // 15% extra breathing room
     const latDegPerM = 1 / 111320;
     const lonDegPerM = 1 / (111320 * Math.cos(lat * Math.PI/180));
     return {
-      left:   lon - halfWm * lonDegPerM,
-      right:  lon + halfWm * lonDegPerM,
-      top:    lat + halfHm * latDegPerM,
-      bottom: lat - halfHm * latDegPerM
+      left:   lon - (halfWm * lonDegPerM * pad),
+      right:  lon + (halfWm * lonDegPerM * pad),
+      top:    lat + (halfHm * latDegPerM * pad),
+      bottom: lat - (halfHm * latDegPerM * pad),
     };
   };
 
   const osmEmbedUrl = (lat, lon, zoom) => {
+    // Try to size bbox to the actual rendered box for better framing
+    const wrap = document.getElementById('side-map-wrap');
+    const pxW = Math.max(240, (wrap?.clientWidth || 300));
+    const pxH = Math.max(240, (wrap?.clientHeight || 400));
+
+    const { left, right, top, bottom } = bboxFor(lat, lon, zoom, pxW, pxH);
+
     const u = new URL('https://www.openstreetmap.org/export/embed.html');
-    // Use explicit marker + zoom so the pin always renders and stays centered
-    u.searchParams.set('layer', 'mapnik');           // base tiles
-    u.searchParams.set('marker', `${lat},${lon}`);   // red pin
-    u.searchParams.set('zoom', String(zoom));        // view level
-    return u.href;
+    u.searchParams.set('layer', 'mapnik');
+    u.searchParams.set('bbox', `${left},${bottom},${right},${top}`);
+    u.searchParams.set('marker', `${lat},${lon}`);
+
+    // Belt-and-suspenders: hash also carries the zoom/center for the embed
+    return `${u.href}#map=${zoom}/${lat}/${lon}`;
   };
+
   // ---------- styles ----------
   const ensureStyle = () => {
     if (document.getElementById(STYLE_ID)) return;
