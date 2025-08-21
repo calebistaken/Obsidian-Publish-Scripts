@@ -282,12 +282,24 @@
       }
 
       #${META_ID}{
-        margin-top:.35rem; font-size: var(--font-small, .85rem);
-        color: var(--text-muted, inherit);
-        display:flex; flex-direction:column; align-items:center;
-        gap:.4rem; line-height:1.25; white-space:normal; word-break:break-word;
+        margin-top: .35rem;
+        font-size: var(--font-small, .85rem);
+        color: var(--text-muted);
+        font-family: 'Alegreya SC', sans-serif;
+        text-align: center;
+
+        display: inline-block;   /* shrink-wraps text */
+        line-height: 1.25;
+        white-space: normal;
+        word-break: break-word;
       }
-    `;
+
+      #${META_ID} .place,
+      #${META_ID} .sep,
+      #${META_ID} .date {
+        display: inline;         /* all inline on same line */
+      }
+      `;
     const el=document.createElement('style');
     el.id=STYLE_ID; el.textContent=css;
     document.head.appendChild(el);
@@ -325,11 +337,9 @@
 
     const pieces = [];
     if (locationText) pieces.push(`<span class="place">${locationText}</span>`);
-    if (locationText && dateStr) pieces.push(`<span class="sep">•</span>`);
+    if (locationText && dateStr) pieces.push(`<span class="sep"> • </span>`);
     if (dateStr) pieces.push(`<span class="date">${String(dateStr)}</span>`);
-    const metaHTML = pieces.join(' ');
-
-    const block = buildBlock(lat, lon, metaHTML);
+    const metaHTML = pieces.join('');    const block = buildBlock(lat, lon, metaHTML);
 
     const graph = getGraphOuter();
     if (graph && graph.parentNode === right) {
