@@ -1,17 +1,16 @@
 /**
- * Obsidian Publish — Lightbox with fixed filmstrip, header (note title + H2), and sidebar map as last item
- * - Click any image/video in .markdown-rendered to open
- * - Keyboard: ← → navigate, Esc close
- * - Filmstrip: drag-to-scroll (mouse/touch/pen) + click to jump (drag guard)
- * - Header shows NOTE TITLE (line 1) and current image's H2 (line 2)
- * - Appends sidebar map <iframe> as final gallery item (thumb + full-frame)
- * - Media/caption never overlap header or filmstrip
+ * Obsidian Publish — Lightbox with fixed filmstrip, H1 title, H2 section, and sidebar map as last item
+ * Fixes:
+ * - Black filmstrip background (no white)
+ * - Multiple thumb selections in a row
+ * - Map alt text pulls the rendered location string
+ * - Portrait/square images bounded to viewport (no overlap/off-screen)
  */
 (() => {
-  if (window.__obsZoomBoundAllInOne) return;
-  window.__obsZoomBoundAllInOne = true;
+  if (window.__obsZoomBound_Polished) return;
+  window.__obsZoomBound_Polished = true;
 
-  // ---------------- Inject CSS ----------------
+  // ==================== CSS ====================
   const CSS = `
 :root{
   --zoom-thumb-height: 100px;
@@ -22,19 +21,24 @@
   );
   --zoom-header-fallback-h: 56px;
   --zoom-header-actual-h: var(--zoom-header-fallback-h);
+  --zoom-gap: var(--zoom-thumb-gap);
 }
 
 .zoom-overlay{
-  position: fixed; inset: 0; display: grid; place-items: center;
-  background: rgba(0,0,0,.85); z-index: 9999; backdrop-filter: blur(8px);
+  position: fixed; inset: 0;
+  display: block; /* simpler, no grid sizing surprises */
+  background: rgba(0,0,0,.88);
+  z-index: 9999;
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
 }
 body.zoom-open{ overflow: hidden; }
 
-/* Header (note title + section); auto-height measured and reserved below */
+/* Header (note title + current H2) */
 .zoom-overlay__header{
   position: fixed; top: 0; left: 0; right: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 2px; padding: 8px 56px 10px; /* room for close btn */
+  gap: 2px; padding: 8px 56px 10px;
   pointer-events: none; z-index: 10002;
   background: linear-gradient(to bottom, rgba(0,0,0,.35), rgba(0,0,0,0));
   -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
@@ -60,39 +64,52 @@ body.zoom-open{ overflow: hidden; }
 }
 .zoom-overlay__close:hover{ color: #fff; }
 
-/* Layout reserves header & filmstrip space */
+/* Reserve space for header + filmstrip using measured header height */
 .zoom-overlay__inner{
-  position: relative; max-width: 90vw; max-height: 90vh;
-  display: flex; flex-direction: column; gap: var(--zoom-thumb-gap);
-  padding-top: calc(var(--zoom-header-actual-h) + var(--zoom-thumb-gap));
-  padding-bottom: calc(var(--zoom-thumbs-total-height) + var(--zoom-thumb-gap));
+  position: fixed; inset: 0; /* fill viewport; we'll pad inside */
+  padding-top: calc(var(--zoom-header-actual-h) + var(--zoom-gap));
+  padding-bottom: calc(var(--zoom-thumbs-total-height) + var(--zoom-gap));
+  display: grid; place-items: center;
+  box-sizing: border-box;
 }
 
 /* Main media area */
 .zoom-overlay__wrap{
-  max-width: 100%;
-  max-height: calc(90vh - var(--zoom-thumbs-total-height) - var(--zoom-thumb-gap) - var(--zoom-header-actual-h) - var(--zoom-thumb-gap));
+  width: 100%;
+  height: 100%;
   display: grid; place-items: center;
+  box-sizing: border-box;
 }
-.zoom-overlay__media{
-  max-width: 100vw; max-height: 100%; object-fit: contain;
+.zoom-overlay__media, .zoom-overlay__media--frame{
+  max-width: 100vw;
+  /* Strict clamp: viewport minus header minus filmstrip minus gaps */
+  max-height: calc(100vh - var(--zoom-header-actual-h) - var(--zoom-thumbs-total-height) - (2 * var(--zoom-gap)));
+  object-fit: contain;
   border-radius: var(--img-border-radius, 6px);
   box-shadow: 0 4px 20px rgba(0,0,0,.6);
   background: #000;
 }
 .zoom-overlay__media--frame{
-  width: 100%; height: 100%; border: 0; border-radius: var(--img-border-radius, 6px);
-  background: #000;
+  width: 100%;
+  height: 100%;
+  border: 0;
 }
 
+/* Caption */
 .zoom-overlay__caption{
+  position: fixed;
+  left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--zoom-thumbs-total-height) + var(--zoom-gap));
   color: var(--text-muted);
-  font-family: 'Alegreya SC', sans-serif; font-size: var(--font-ui-large);
-  line-height: 1.3; max-width: 80ch; margin: 0 auto; text-align: center;
-  padding-bottom: var(--zoom-thumb-gap);
+  font-family: 'Alegreya SC', sans-serif;
+  font-size: var(--font-ui-large);
+  line-height: 1.3; max-width: 80ch;
+  text-align: center;
+  padding: 4px 10px;
+  background: transparent;
 }
 
-/* Nav zones (don’t overlap header/filmstrip) */
+/* Nav zones never overlap header/filmstrip */
 .zoom-overlay__nav{
   position: fixed; top: var(--zoom-header-actual-h); bottom: var(--zoom-thumbs-total-height);
   width: 40%; z-index: 9998;
@@ -100,36 +117,48 @@ body.zoom-open{ overflow: hidden; }
 .zoom-overlay__nav--left{ left: 0; cursor: w-resize; }
 .zoom-overlay__nav--right{ right: 0; cursor: e-resize; }
 
-/* Filmstrip */
+/* Filmstrip (black) */
 .zoom-overlay__thumbs{
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: calc(env(safe-area-inset-bottom,0px) + var(--zoom-thumb-gap));
+  bottom: calc(env(safe-area-inset-bottom,0px) + var(--zoom-gap));
   width: min(90vw, 1400px);
-  box-sizing: border-box; padding: var(--zoom-thumb-pad);
-  overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  padding: var(--zoom-thumb-pad);
+  overflow-x: auto; overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
-  z-index: 10001; backdrop-filter: blur(2px);
+  z-index: 10001;
+  background: rgba(0,0,0,.92);     /* ← solid dark backdrop */
+  border-radius: 8px;
   cursor: grab; user-select: none; touch-action: pan-x;
 }
 .zoom-overlay__thumbs.dragging{ cursor: grabbing; }
-.zoom-overlay__thumbs-track{ display: flex; align-items: center; gap: var(--zoom-thumb-gap); min-width: 100%; }
+.zoom-overlay__thumbs-track{
+  display: flex; align-items: center; gap: var(--zoom-thumb-gap); min-width: 100%;
+}
 
-/* Thumbs */
+/* Thumbs (ensure no white gaps) */
 .zoom-thumb{
-  position: relative; display: inline-flex; align-items: center; justify-content: center;
-  height: var(--zoom-thumb-height); aspect-ratio: 16 / 10;
-  background: none; cursor: pointer; border-radius: var(--img-border-radius, 6px);
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  height: var(--zoom-thumb-height); aspect-ratio: 16/10;
+  background: #000;                 /* ← black behind every thumb */
+  cursor: pointer; border-radius: var(--img-border-radius, 6px);
   outline: 2px solid transparent; transition: box-shadow .18s ease, outline-color .18s ease, transform .18s ease;
   touch-action: manipulation;
+  box-sizing: border-box;
 }
-.zoom-thumb__media{
-  height: 100%; width: auto; max-width: 260px; object-fit: cover;
-  border-radius: inherit; box-shadow: 0 2px 10px rgba(0,0,0,.35); background: #000;
+.zoom-thumb__media, .zoom-thumb__frame{
+  display: block;                   /* ← remove inline gaps */
+  height: 100%; width: auto; max-width: 260px;
+  object-fit: cover;
+  border-radius: inherit;
+  box-shadow: 0 2px 10px rgba(0,0,0,.35);
+  background: #000;
   -webkit-user-drag: none; user-drag: none; pointer-events: none;
 }
 .zoom-thumb__frame{
-  height: 100%; width: auto; max-width: 260px; border: 0; border-radius: inherit;
-  pointer-events: none; background: #000;
+  border: 0;
 }
 .zoom-thumb.is-active{
   outline-color: rgba(255,255,255,.85);
@@ -141,13 +170,12 @@ body.zoom-open{ overflow: hidden; }
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  // ---------------- Utilities ----------------
+  // ==================== Utility & Model ====================
   const SELECTOR_MEDIA = '.markdown-rendered .image-embed img, .markdown-rendered .video-embed video';
 
   function getSectionH2TextFor(el, root = document.querySelector('.markdown-rendered') || document) {
     if (!el || !root) return '';
     const h2s = Array.from(root.querySelectorAll('h2'));
-    if (!h2s.length) return '';
     let last = '';
     for (const h2 of h2s) {
       if (h2.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
@@ -163,29 +191,40 @@ body.zoom-open{ overflow: hidden; }
     return alt && !looksLikeFilename ? alt : '';
   }
 
+  // Robustly pull the map label from the DOM your map script renders
   function detectSidebarMap() {
     const wrap = document.getElementById('side-map-wrap')
-              || document.querySelector('#side-map-wrap, .side-map-wrap, [data-side-map-wrap]');
+      || document.querySelector('#side-map-wrap, .side-map-wrap, [data-side-map-wrap]')
+      || document.querySelector('[data-map-wrap], .map-wrap'); // extra leeway
+
     const iframe = document.getElementById('side-map-iframe')
-                 || document.querySelector('#side-map-iframe, .side-map-iframe, [data-side-map-iframe]')
-                 || (wrap && wrap.querySelector('iframe'));
+      || document.querySelector('#side-map-iframe, .side-map-iframe, [data-side-map-iframe]')
+      || (wrap && wrap.querySelector('iframe'));
+
     if (!iframe || !iframe.src) return null;
 
-    let label = '';
-    if (wrap) {
-      const meta = wrap.querySelector('.side-map-meta, .side-map-text, .map-meta, .map-label');
-      if (meta) label = meta.textContent.trim();
-      if (!label) {
-        const clone = wrap.cloneNode(true);
-        clone.querySelector('iframe')?.remove();
-        label = (clone.textContent || '').trim();
-      }
+    // 1) Preferred explicit location element (extend as needed)
+    let labelEl =
+      (wrap && wrap.querySelector('.sidebar-map-location, #sidebar-map-location, .side-map-location, #side-map-location, [data-map-location], .map-location, .map-label, .side-map-meta, .side-map-text, .map-meta')) ||
+      // 2) Next sibling paragraph/span below the iframe
+      iframe.nextElementSibling && /^(P|DIV|SPAN)$/i.test(iframe.nextElementSibling.tagName) ? iframe.nextElementSibling : null;
+
+    let label = labelEl?.textContent?.trim?.() || '';
+
+    // 3) As a fallback, text content of the wrapper without the iframe
+    if (!label && wrap) {
+      const clone = wrap.cloneNode(true);
+      clone.querySelector('iframe')?.remove();
+      label = (clone.textContent || '').replace(/\s+/g,' ').trim();
     }
+
+    // 4) Final fallback: H1 / document.title
     if (!label) label = document.querySelector('h1')?.textContent?.trim?.() || document.title || 'Map';
+
     return { src: iframe.src, label };
   }
 
-  // ---------------- Model ----------------
+  // Normalized gallery items
   let mediaItems = []; // [{type:'img'|'video'|'map', src, alt, caption, section}]
   let currentIndex = -1;
 
@@ -209,14 +248,14 @@ body.zoom-open{ overflow: hidden; }
       mediaItems.push({
         type: 'map',
         src: map.src,
-        alt: map.label,
-        caption: map.label, // or '' if you prefer no caption under the map
+        alt: map.label,      // requested: use rendered location text
+        caption: map.label,  // show under the frame too (change to '' if you prefer none)
         section: '',
       });
     }
   }
 
-  // ---------------- Rendering ----------------
+  // ==================== Rendering ====================
   function measureAndSetHeaderHeight(headerEl) {
     const h = headerEl?.getBoundingClientRect?.().height || 0;
     document.documentElement.style.setProperty('--zoom-header-actual-h', `${Math.ceil(h)}px`);
@@ -312,7 +351,10 @@ body.zoom-open{ overflow: hidden; }
     currentIndex = -1;
   }
 
-  // ---------------- Build overlay ----------------
+  // ==================== Build overlay ====================
+  // scroller drag state shared with thumb clicks
+  let scrollerDragging = false;
+
   function openOverlay(startIndex) {
     collectMedia();
     if (!mediaItems.length) return;
@@ -328,20 +370,28 @@ body.zoom-open{ overflow: hidden; }
         <div class="zoom-overlay__section" style="display:none;"></div>
         <button class="zoom-overlay__close" aria-label="Close">&times;</button>
       </div>
+
       <div class="zoom-overlay__inner">
         <div class="zoom-overlay__wrap"></div>
-        <div class="zoom-overlay__caption"></div>
       </div>
+
+      <div class="zoom-overlay__caption"></div>
+
       <div class="zoom-overlay__nav zoom-overlay__nav--left"></div>
       <div class="zoom-overlay__nav zoom-overlay__nav--right"></div>
-      <div class="zoom-overlay__thumbs"><div class="zoom-overlay__thumbs-track"></div></div>
+
+      <div class="zoom-overlay__thumbs">
+        <div class="zoom-overlay__thumbs-track"></div>
+      </div>
     `;
     document.body.appendChild(ov);
     document.body.classList.add('zoom-open');
 
     // Measure header height after mount
     const headerEl = ov.querySelector('.zoom-overlay__header');
-    requestAnimationFrame(() => measureAndSetHeaderHeight(headerEl));
+    requestAnimationFrame(() => {
+      measureAndSetHeaderHeight(headerEl);
+    });
 
     // Build thumbnails (images/videos first, map last if present)
     const track = ov.querySelector('.zoom-overlay__thumbs-track');
@@ -377,18 +427,9 @@ body.zoom-open{ overflow: hidden; }
       btn.appendChild(thumbNode);
       track.appendChild(btn);
 
-      // Per-thumb drag guard
-      let localDragMovedPx = 0, localStartX = 0;
-      btn.addEventListener('pointerdown', (e) => { localStartX = e.clientX ?? 0; localDragMovedPx = 0; }, { passive: true });
-      btn.addEventListener('pointermove', (e) => {
-        if (!localStartX) return;
-        const dx = (e.clientX ?? 0) - localStartX;
-        localDragMovedPx = Math.max(localDragMovedPx, Math.abs(dx));
-      }, { passive: true });
-      btn.addEventListener('pointerup', () => { localStartX = 0; }, { passive: true });
-
+      // Click to jump — but only if the scroller wasn't dragging at the time
       btn.addEventListener('click', (e) => {
-        if (localDragMovedPx > 6) return; // it was a drag
+        if (scrollerDragging) return;
         e.preventDefault();
         e.stopPropagation();
         renderAt(idx);
@@ -400,18 +441,25 @@ body.zoom-open{ overflow: hidden; }
     let dragging = false, sx = 0, sl = 0;
     sc.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
-      dragging = true; sx = e.clientX; sl = sc.scrollLeft;
+      dragging = true;
+      scrollerDragging = false;
+      sx = e.clientX;
+      sl = sc.scrollLeft;
       sc.classList.add('dragging');
       sc.setPointerCapture?.(e.pointerId);
-      e.preventDefault();
+      e.preventDefault(); // stop text/image drag
     });
     sc.addEventListener('pointermove', (e) => {
       if (!dragging) return;
-      sc.scrollLeft = sl - (e.clientX - sx);
-    });
+      const dx = e.clientX - sx;
+      if (!scrollerDragging && Math.abs(dx) > 4) scrollerDragging = true; // ← establish drag intent
+      sc.scrollLeft = sl - dx;
+    }, { passive: true });
     const endDrag = (e) => {
       if (!dragging) return;
       dragging = false;
+      // brief timeout so click that ends the drag won't misfire
+      setTimeout(() => { scrollerDragging = false; }, 0);
       sc.classList.remove('dragging');
       sc.releasePointerCapture?.(e.pointerId);
     };
@@ -436,18 +484,16 @@ body.zoom-open{ overflow: hidden; }
     ov._onKey = onKey;
 
     renderAt(currentIndex);
-    requestAnimationFrame(() => measureAndSetHeaderHeight(headerEl));
   }
 
-  // ---------------- Open on normal view click (scoped + delegated) ----------------
+  // ==================== Open from normal view (delegated) ====================
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     const media = e.target.closest(SELECTOR_MEDIA);
     if (!media) return;
-    if (media.closest('a, .internal-link, .zoom-overlay')) return; // let links or overlay clicks behave
+    if (media.closest('a, .internal-link, .zoom-overlay')) return; // let links or overlay behave
     e.preventDefault();
 
-    // Build list fresh and compute starting index among *page* media
     const root = document.querySelector('.markdown-rendered') || document;
     const pageMedia = Array.from(root.querySelectorAll(SELECTOR_MEDIA));
     const startIndex = pageMedia.indexOf(media);
