@@ -45,7 +45,7 @@ body.zoom-open{ overflow: hidden; }
 }
 .zoom-overlay__title, .zoom-overlay__section{
   pointer-events: auto;
-  font-family: 'Alegreya SC', sans-serif;
+  font-family: var(--font-caption-theme), var(--font-monospace-theme), sans-serif;
   text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 80%;
 }

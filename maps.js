@@ -285,7 +285,7 @@
         margin-top: .35rem;
         font-size: var(--font-small, .85rem);
         color: var(--text-muted);
-        font-family: 'Alegreya SC', sans-serif;
+        font-family: var(--font-caption-theme), var(--font-monospace-theme), san-serif;
         text-align: center;
 
         display: inline-block;   /* shrink-wraps text */
